@@ -1,14 +1,20 @@
 const express = require("express");
+require("dotenv").config();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-require("dotenv").config();
+
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.PAYMENT_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5000;
 
 // middleware
-app.use(cors());
+const corsOptions = {
+  origin:
+    "http://localhost:5173",
+  optionsSuccessStatus: 200,
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const verifyJWT = (req, res, next) => {
@@ -57,7 +63,7 @@ async function run() {
       res.send({ token });
     });
 
-    const verifyAdmin = async (req, res, next) => {
+    async function verifyAdmin(req, res, next) {
       const email = req.decoded.email;
       const query = { email: email };
       const user = await usersCollection.findOne(query);
@@ -67,15 +73,15 @@ async function run() {
           .send({ error: true, message: "Forbidden message" });
       }
       next();
-    };
+    }
 
     // users related apis
-    app.get("/users", verifyJWT, verifyAdmin, async (req, res) => {
+    app.get("/users", verifyJWT, verifyAdmin, async function (req, res) {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
 
-    app.post("/users", async (req, res) => {
+    app.post("/users", async function (req, res) {
       const user = req.body;
       const query = { email: user.email };
       const existingUser = await usersCollection.findOne(query);
@@ -86,7 +92,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users/admin/:email", verifyJWT, async (req, res) => {
+    app.get("/users/admin/:email", verifyJWT, async function (req, res) {
       const email = req.params.email;
 
       if (req.decoded.email !== email) {
@@ -99,7 +105,7 @@ async function run() {
       res.send(result);
     });
 
-    app.patch("/users/admin/:id", async (req, res) => {
+    app.patch("/users/admin/:id", async function (req, res) {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const updateDoc = {
@@ -112,18 +118,18 @@ async function run() {
     });
 
     // menu related apis
-    app.get("/menu", async (req, res) => {
+    app.get("/menu", async function (req, res) {
       const result = await menuCollection.find().toArray();
       res.send(result);
     });
 
-    app.post("/menu", verifyJWT, verifyAdmin, async (req, res) => {
+    app.post("/menu", verifyJWT, verifyAdmin, async function (req, res) {
       const newItem = req.body;
       const result = await menuCollection.insertOne(newItem);
       res.send(result);
     });
 
-    app.delete("/menu/:id", verifyJWT, verifyAdmin, async (req, res) => {
+    app.delete("/menu/:id", verifyJWT, verifyAdmin, async function (req, res) {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await menuCollection.deleteOne(query);
@@ -131,13 +137,13 @@ async function run() {
     });
 
     // review related apis
-    app.get("/reviews", async (req, res) => {
+    app.get("/reviews", async function (req, res) {
       const result = await reviewCollection.find().toArray();
       res.send(result);
     });
 
     //cart collection
-    app.get("/carts", verifyJWT, async (req, res) => {
+    app.get("/carts", verifyJWT, async function (req, res) {
       const email = req.query.email;
       if (!email) {
         res.send([]);
@@ -152,13 +158,13 @@ async function run() {
       const result = await cartCollection.find(query).toArray();
       res.send(result);
     });
-    app.post("/carts", async (req, res) => {
+    app.post("/carts", async function (req, res) {
       const item = req.body;
       const result = await cartCollection.insertOne(item);
       res.send(result);
     });
 
-    app.delete("/carts/:id", async (req, res) => {
+    app.delete("/carts/:id", async function (req, res) {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await cartCollection.deleteOne(query);
@@ -166,9 +172,9 @@ async function run() {
     });
 
     // create payment intent
-    app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+    app.post("/create-payment-intent", verifyJWT, async function (req, res) {
       const { price } = req.body;
-      const amount = price * 100;
+      const amount = parseInt(price * 100);
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount,
         currency: "usd",
@@ -180,7 +186,7 @@ async function run() {
     });
 
     //payment related api
-    app.post("/payments", verifyJWT, async (req, res) => {
+    app.post("/payments", verifyJWT, async function (req, res) {
       const payment = req.body;
       const insertResult = await paymentCollection.insertOne(payment);
       const query = {
@@ -191,21 +197,58 @@ async function run() {
       res.send({ insertResult, deleteResult });
     });
 
-    app.get('/admin-stats', verifyJWT, verifyAdmin, async(req, res) => {
+    app.get("/admin-stats", verifyJWT, verifyAdmin, async function (req, res) {
       const users = await usersCollection.estimatedDocumentCount();
       const products = await menuCollection.estimatedDocumentCount();
       const orders = await paymentCollection.estimatedDocumentCount();
       const payments = await paymentCollection.find().toArray();
-      const revenues = payments.reduce((sum, payment) => sum + payment.price, 0);
-      const revenue = parseFloat(revenues.toFixed(2))
+      const revenues = payments.reduce(
+        (sum, payment) => sum + payment.price,
+        0
+      );
+      const revenue = parseFloat(revenues.toFixed(2));
 
       res.send({
         users,
         products,
         orders,
-        revenue
-      })
-    })
+        revenue,
+      });
+    });
+
+    app.get("/order-stats", verifyJWT, verifyAdmin, async function (req, res) {
+      const pipeline = [
+        {
+          $lookup: {
+            from: "menu",
+            localField: "menuItems",
+            foreignField: "_id",
+            as: "menuItemsData",
+          },
+        },
+        {
+          $unwind: "$menuItemsData",
+        },
+        {
+          $group: {
+            _id: "$menuItemsData.category",
+            count: { $sum: 1 },
+            totalPrice: { $sum: "$menuItemsData.price" },
+          },
+        },
+        {
+          $project: {
+            category: "$_id",
+            count: 1,
+            total: { $round: ["$totalPrice", 2] },
+            _id: 0,
+          },
+        },
+      ];
+
+      const result = await paymentCollection.aggregate(pipeline).toArray();
+      res.send(result);
+    });
 
     await client.connect();
     await client.db("admin").command({ ping: 1 });
