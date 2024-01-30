@@ -183,7 +183,6 @@ async function run() {
     app.post("/payments", verifyJWT, async (req, res) => {
       const payment = req.body;
       const insertResult = await paymentCollection.insertOne(payment);
-
       const query = {
         _id: { $in: payment.cartItems.map((id) => new ObjectId(id)) },
       };
@@ -191,6 +190,22 @@ async function run() {
 
       res.send({ insertResult, deleteResult });
     });
+
+    app.get('/admin-stats', verifyJWT, verifyAdmin, async(req, res) => {
+      const users = await usersCollection.estimatedDocumentCount();
+      const products = await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+      const payments = await paymentCollection.find().toArray();
+      const revenues = payments.reduce((sum, payment) => sum + payment.price, 0);
+      const revenue = parseFloat(revenues.toFixed(2))
+
+      res.send({
+        users,
+        products,
+        orders,
+        revenue
+      })
+    })
 
     await client.connect();
     await client.db("admin").command({ ping: 1 });
