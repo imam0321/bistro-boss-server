@@ -2,18 +2,23 @@ const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.PAYMENT_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5000;
-
-// middleware
 const corsOptions = {
   origin:
     "http://localhost:5173",
   optionsSuccessStatus: 200,
 };
+
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Something went wrong!');
+});
+
+// middleware
+
 app.use(cors(corsOptions));
 app.use(express.json());
 
@@ -196,6 +201,15 @@ async function run() {
 
       res.send({ insertResult, deleteResult });
     });
+
+    app.get('/payments/:email', verifyJWT, async function (req, res) {
+      const query = { email: req.params.email};
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send({message: 'forbidden access'});
+      }
+      const result = await paymentCollection.find(query).toArray();
+      res.send(result);
+    })
 
     app.get("/admin-stats", verifyJWT, verifyAdmin, async function (req, res) {
       const users = await usersCollection.estimatedDocumentCount();
